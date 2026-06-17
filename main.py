@@ -6,6 +6,7 @@ import time
 import numpy as np
 import tkinter as tk
 from tkinter import messagebox, simpledialog
+from PIL import Image, ImageTk
 
 # --- 1. CONFIGURACIÓN DE BASE DE DATOS (SQLite3) ---
 def inicializar_db():
@@ -48,6 +49,123 @@ def registrar_usuario_en_db(nombre, saldo_inicial=1000.0):
     cursor.execute("INSERT OR IGNORE INTO usuarios (nombre, saldo) VALUES (?, ?)", (nombre, saldo_inicial))
     conn.commit()
     conn.close()
+
+def obtener_usuarios_db():
+    conn = sqlite3.connect('banco.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre, saldo FROM usuarios ORDER BY id ASC")
+    usuarios = cursor.fetchall()
+    conn.close()
+    return usuarios
+
+def obtener_ruta_imagen_usuario(nombre):
+    for extension in (".jpg", ".jpeg", ".png"):
+        ruta = os.path.join("dataset_caras", f"{nombre}{extension}")
+        if os.path.exists(ruta):
+            return ruta
+    return None
+
+def obtener_thumbnail_usuario(nombre, tamano=(86, 86)):
+    ruta = obtener_ruta_imagen_usuario(nombre)
+    imagen = None
+
+    if ruta:
+        try:
+            imagen = Image.open(ruta).convert("RGB")
+            imagen.thumbnail(tamano)
+        except Exception:
+            imagen = None
+
+    if imagen is None:
+        imagen = Image.new("RGB", tamano, (220, 220, 220))
+    else:
+        fondo = Image.new("RGB", tamano, (220, 220, 220))
+        offset_x = (tamano[0] - imagen.width) // 2
+        offset_y = (tamano[1] - imagen.height) // 2
+        fondo.paste(imagen, (offset_x, offset_y))
+        imagen = fondo
+
+    return ImageTk.PhotoImage(imagen)
+
+def modificar_usuario(nombre_actual, nuevo_nombre=None, nuevo_saldo=None):
+    nombre_nuevo = nombre_actual if nuevo_nombre is None else nuevo_nombre.strip()
+    if not nombre_nuevo:
+        return False, "El nombre no puede quedar vacío."
+
+    conn = sqlite3.connect('banco.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre FROM usuarios WHERE nombre = ?", (nombre_actual,))
+    usuario = cursor.fetchone()
+    if usuario is None:
+        conn.close()
+        return False, "El usuario ya no existe."
+
+    if nombre_nuevo != nombre_actual:
+        cursor.execute("SELECT 1 FROM usuarios WHERE nombre = ?", (nombre_nuevo,))
+        if cursor.fetchone() is not None:
+            conn.close()
+            return False, f"Ya existe un usuario llamado '{nombre_nuevo}'."
+
+    ruta_origen = obtener_ruta_imagen_usuario(nombre_actual)
+    ruta_destino = None
+    if ruta_origen:
+        _, extension = os.path.splitext(ruta_origen)
+        ruta_destino = os.path.join("dataset_caras", f"{nombre_nuevo}{extension}")
+        if nombre_nuevo != nombre_actual and os.path.exists(ruta_destino):
+            conn.close()
+            return False, f"Ya existe el archivo de dataset para '{nombre_nuevo}'."
+
+    try:
+        if nombre_nuevo != nombre_actual:
+            cursor.execute("UPDATE usuarios SET nombre = ? WHERE nombre = ?", (nombre_nuevo, nombre_actual))
+
+        if nuevo_saldo is not None:
+            cursor.execute("UPDATE usuarios SET saldo = ? WHERE nombre = ?", (float(nuevo_saldo), nombre_nuevo))
+
+        if ruta_origen and ruta_destino and ruta_origen != ruta_destino:
+            os.rename(ruta_origen, ruta_destino)
+
+        conn.commit()
+        conn.close()
+        return True, nombre_nuevo
+    except Exception as error:
+        conn.rollback()
+        conn.close()
+        return False, f"No se pudo modificar el usuario: {error}"
+
+def ingresar_dinero_usuario(nombre, monto):
+    conn = sqlite3.connect('banco.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT saldo FROM usuarios WHERE nombre = ?", (nombre,))
+    resultado = cursor.fetchone()
+    if resultado is None:
+        conn.close()
+        return False, "Usuario no registrado en DB."
+
+    nuevo_saldo = float(resultado[0]) + float(monto)
+    cursor.execute("UPDATE usuarios SET saldo = ? WHERE nombre = ?", (nuevo_saldo, nombre))
+    conn.commit()
+    conn.close()
+    return True, nuevo_saldo
+
+def eliminar_usuario_completo(nombre):
+    conn = sqlite3.connect('banco.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM usuarios WHERE nombre = ?", (nombre,))
+    conn.commit()
+    conn.close()
+
+    if not os.path.exists("dataset_caras"):
+        return True
+
+    eliminados = False
+    for extension in (".jpg", ".jpeg", ".png"):
+        ruta = os.path.join("dataset_caras", f"{nombre}{extension}")
+        if os.path.exists(ruta):
+            os.remove(ruta)
+            eliminados = True
+
+    return True if eliminados or True else False
 
 # --- 2. CARGA DE MODELOS FACIALES ---
 def cargar_dataset(ruta_dataset="dataset_caras"):
@@ -457,6 +575,182 @@ def arrancar_app():
         encodings_conocidos, nombres_conocidos = cargar_dataset()
         lbl_usuarios.config(text=f"Usuarios cargados: {len(nombres_conocidos)}")
 
+    def abrir_gestion_usuarios():
+        ventana_gestion = tk.Toplevel(ventana)
+        ventana_gestion.title("Ver o Modificar Usuarios")
+        ventana_gestion.geometry("1100x650")
+        ventana_gestion.configure(bg="#f4f4f4")
+        ventana_gestion.transient(ventana)
+        ventana_gestion.grab_set()
+
+        referencias_imagenes = []
+
+        cabecera = tk.Frame(ventana_gestion, bg="#f4f4f4")
+        cabecera.pack(fill="x", padx=16, pady=(16, 10))
+
+        tk.Label(cabecera, text="Ver o Modificar Usuarios", font=("Arial", 18, "bold"), bg="#f4f4f4").pack(side="left")
+        tk.Button(
+            cabecera,
+            text="Volver",
+            command=ventana_gestion.destroy,
+            bg="#666666",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            width=12,
+            relief="flat"
+        ).pack(side="right")
+
+        info = tk.Label(
+            ventana_gestion,
+            text="Los cambios se reflejan automáticamente en la lista y en el dataset.",
+            bg="#f4f4f4",
+            fg="#555555",
+            font=("Arial", 10)
+        )
+        info.pack(anchor="w", padx=18, pady=(0, 8))
+
+        marco_principal = tk.Frame(ventana_gestion, bg="#f4f4f4")
+        marco_principal.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+        canvas = tk.Canvas(marco_principal, bg="#ffffff", highlightthickness=0)
+        scrollbar = tk.Scrollbar(marco_principal, orient="vertical", command=canvas.yview)
+        contenedor = tk.Frame(canvas, bg="#ffffff")
+
+        contenedor.bind(
+            "<Configure>",
+            lambda event: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=contenedor, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        encabezados = ["ID", "Nombre", "Saldo", "Foto", "Acciones"]
+        anchos = [60, 220, 120, 140, 460]
+        for columna, (titulo, ancho) in enumerate(zip(encabezados, anchos)):
+            tk.Label(
+                contenedor,
+                text=titulo,
+                bg="#ececec",
+                fg="#222222",
+                font=("Arial", 10, "bold"),
+                width=max(1, ancho // 10),
+                anchor="w",
+                padx=10,
+                pady=8,
+                relief="solid",
+                borderwidth=1,
+            ).grid(row=0, column=columna, sticky="nsew")
+
+        for columna, ancho in enumerate(anchos):
+            contenedor.grid_columnconfigure(columna, weight=1, minsize=ancho)
+
+        def refrescar_listado():
+            referencias_imagenes.clear()
+            for widget in contenedor.winfo_children():
+                if int(widget.grid_info().get("row", 0)) > 0:
+                    widget.destroy()
+
+            usuarios = obtener_usuarios_db()
+            if not usuarios:
+                tk.Label(
+                    contenedor,
+                    text="No hay usuarios cargados.",
+                    bg="#ffffff",
+                    fg="#666666",
+                    font=("Arial", 11),
+                    anchor="w",
+                    padx=10,
+                    pady=18,
+                ).grid(row=1, column=0, columnspan=5, sticky="ew")
+                return
+
+            for fila, (usuario_id, nombre, saldo) in enumerate(usuarios, start=1):
+                fondo = "#ffffff" if fila % 2 else "#fafafa"
+                tk.Label(contenedor, text=str(usuario_id), bg=fondo, anchor="w", padx=10, pady=12, relief="solid", borderwidth=1).grid(row=fila, column=0, sticky="nsew")
+                tk.Label(contenedor, text=nombre, bg=fondo, anchor="w", padx=10, pady=12, relief="solid", borderwidth=1).grid(row=fila, column=1, sticky="nsew")
+                tk.Label(contenedor, text=f"${float(saldo):.2f}", bg=fondo, anchor="w", padx=10, pady=12, relief="solid", borderwidth=1).grid(row=fila, column=2, sticky="nsew")
+
+                foto_frame = tk.Frame(contenedor, bg=fondo, relief="solid", borderwidth=1)
+                foto_frame.grid(row=fila, column=3, sticky="nsew")
+                thumb = obtener_thumbnail_usuario(nombre)
+                referencias_imagenes.append(thumb)
+                tk.Label(foto_frame, image=thumb, bg=fondo).pack(padx=10, pady=8)
+
+                acciones = tk.Frame(contenedor, bg=fondo, relief="solid", borderwidth=1)
+                acciones.grid(row=fila, column=4, sticky="nsew")
+
+                def ejecutar_modificar(nombre_actual=nombre):
+                    nuevo_nombre = simpledialog.askstring(
+                        "Modificar usuario",
+                        "Nuevo nombre (dejar vacío para mantener el actual):",
+                        initialvalue=nombre_actual,
+                        parent=ventana_gestion,
+                    )
+                    if nuevo_nombre is None:
+                        return
+
+                    nuevo_nombre = nuevo_nombre.strip() or nombre_actual
+                    nuevo_saldo = simpledialog.askfloat(
+                        "Modificar saldo",
+                        "Nuevo saldo actual (cancelar para mantener el actual):",
+                        initialvalue=float(saldo),
+                        parent=ventana_gestion,
+                    )
+
+                    exito, resultado = modificar_usuario(nombre_actual, nuevo_nombre=nuevo_nombre, nuevo_saldo=nuevo_saldo)
+                    if exito:
+                        messagebox.showinfo("Usuario modificado", f"Usuario actualizado a '{resultado}'.")
+                        ventana_gestion.after(0, forzar_recarga_total)
+                    else:
+                        messagebox.showerror("Error", resultado)
+
+                def ejecutar_ingreso(nombre_actual=nombre):
+                    monto = simpledialog.askfloat(
+                        "Ingresar dinero",
+                        "Monto a ingresar:",
+                        parent=ventana_gestion,
+                    )
+                    if monto is None:
+                        return
+                    if monto <= 0:
+                        messagebox.showwarning("Monto inválido", "El monto debe ser mayor que cero.")
+                        return
+
+                    exito, resultado = ingresar_dinero_usuario(nombre_actual, monto)
+                    if exito:
+                        messagebox.showinfo("Saldo actualizado", f"Nuevo saldo de '{nombre_actual}': ${resultado:.2f}")
+                        ventana_gestion.after(0, forzar_recarga_total)
+                    else:
+                        messagebox.showerror("Error", resultado)
+
+                def ejecutar_eliminar(nombre_actual=nombre):
+                    confirmar = messagebox.askyesno(
+                        "Eliminar usuario",
+                        f"¿Seguro que quieres eliminar a '{nombre_actual}' y su dataset?",
+                        parent=ventana_gestion,
+                    )
+                    if not confirmar:
+                        return
+
+                    eliminar_usuario_completo(nombre_actual)
+                    ventana_gestion.after(0, forzar_recarga_total)
+
+                tk.Button(acciones, text="Modificar", command=ejecutar_modificar, bg="#f0ad4e", fg="white", font=("Arial", 9, "bold"), width=12, relief="flat").pack(side="left", padx=6, pady=10)
+                tk.Button(acciones, text="Ingresar dinero", command=ejecutar_ingreso, bg="#5cb85c", fg="white", font=("Arial", 9, "bold"), width=14, relief="flat").pack(side="left", padx=6, pady=10)
+                tk.Button(acciones, text="Eliminar", command=ejecutar_eliminar, bg="#d9534f", fg="white", font=("Arial", 9, "bold"), width=10, relief="flat").pack(side="left", padx=6, pady=10)
+
+        def forzar_recarga_total():
+            actualizar_usuarios_y_recargar()
+            refrescar_listado()
+            ventana_gestion.update_idletasks()
+            canvas.yview_moveto(0)
+
+        refrescar_listado()
+        ventana_gestion.after(50, lambda: canvas.yview_moveto(0))
+
     encodings_conocidos, nombres_conocidos = cargar_dataset()
 
     ventana = tk.Tk()
@@ -493,6 +787,11 @@ def arrancar_app():
                            command=boton_cobrar_click,
                            bg="#2980b9", fg="white", font=("Arial", 11), width=28, height=2)
     btn_cobrar.pack(pady=12)
+
+    btn_gestion = tk.Button(ventana, text="Ver o Modificar Usuarios",
+                            command=abrir_gestion_usuarios,
+                            bg="#777777", fg="white", font=("Arial", 11), width=28, height=2)
+    btn_gestion.pack(pady=8)
 
     tk.Label(ventana, text="(Asegurate de tener buena iluminacion y camara conectada)",
              font=("Arial", 9), fg="gray").pack(pady=8)
