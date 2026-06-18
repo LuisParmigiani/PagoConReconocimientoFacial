@@ -1,0 +1,14 @@
+{% extends 'base.html' %} {% block title %}{{ titulo }}{% endblock %} {% block
+content %}
+<section class="panel">
+  <h2>{{ titulo }}</h2>
+  <div class="result-box">{{ detalle }}</div>
+  <div class="toolbar" style="margin-top: 18px">
+    <a class="btn btn-outline" href="{{ volver_url }}">Volver</a>
+    <a class="btn btn-primary" href="{{ inicio_url }}">Ir al inicio</a>
+    <a class="btn btn-gray" href="{{ url_for('usuarios_page') }}"
+      >Ver usuarios</a
+    >
+  </div>
+</section>
+{% endblock %}

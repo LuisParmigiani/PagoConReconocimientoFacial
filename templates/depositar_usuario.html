@@ -1,0 +1,32 @@
+{% extends 'base.html' %} {% block title %}Ingresar dinero{% endblock %} {%
+block content %}
+<div class="top-nav">
+  <a href="{{ url_for('usuarios_page') }}">Volver al listado</a
+  ><span class="muted">Ingreso de dinero al saldo</span>
+</div>
+<section class="panel">
+  <h2>Ingresar dinero</h2>
+  <p class="muted">
+    El saldo actual del usuario es
+    <strong>${{ '%.2f'|format(usuario.saldo) }}</strong>.
+  </p>
+  {% if error %}
+  <div class="flash error">{{ error }}</div>
+  {% endif %}
+  <form method="post">
+    <div class="field">
+      <label for="monto_ingreso">Monto a ingresar</label>
+      <input
+        id="monto_ingreso"
+        name="monto_ingreso"
+        type="number"
+        step="0.01"
+        min="0.01"
+        placeholder="Ej. 500"
+        required
+      />
+    </div>
+    <button class="btn btn-green" type="submit">Actualizar saldo</button>
+  </form>
+</section>
+{% endblock %}

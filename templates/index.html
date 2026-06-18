@@ -1,0 +1,42 @@
+{% extends 'base.html' %} {% block title %}Sistema de Pago Biométrico{% endblock
+%} {% block content %}
+<section class="hero">
+  <h1>Punto de Venta</h1>
+  <p>
+    Protegido con verificacion de persona real (rPPG diferencial). La cámara se
+    abre en el escritorio con OpenCV, pero el acceso y las pantallas ahora se
+    manejan desde Flask y HTML.
+  </p>
+  <div class="stats">
+    <div class="stat">
+      <strong>{{ total_usuarios }}</strong><span>Usuarios en banco.db</span>
+    </div>
+    <div class="stat">
+      <strong>{{ cantidad_dataset }}</strong
+      ><span>Fotos cargadas en dataset</span>
+    </div>
+    <div class="stat">
+      <strong>OpenCV</strong><span>Captura local en escritorio</span>
+    </div>
+  </div>
+</section>
+
+<div class="panel" style="margin-top: 18px">
+  <div class="toolbar">
+    <a class="btn btn-primary" href="{{ url_for('cobrar_page') }}"
+      >Iniciar Escaneo y Cobrar</a
+    >
+    <a class="btn btn-green" href="{{ url_for('registrar_page') }}"
+      >Registrar Nuevo Usuario</a
+    >
+    <a class="btn btn-gray" href="{{ url_for('usuarios_page') }}"
+      >Ver o Modificar Usuarios</a
+    >
+  </div>
+  <div class="note">
+    La lógica facial y de base de datos sigue en el backend. Cada acción abre
+    una pantalla HTML distinta y, cuando corresponde, dispara la cámara de
+    escritorio con OpenCV.
+  </div>
+</div>
+{% endblock %}

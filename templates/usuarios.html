@@ -1,0 +1,75 @@
+{% extends 'base.html' %} {% block title %}Usuarios{% endblock %} {% block
+content %}
+<div class="top-nav">
+  <a href="{{ url_for('index') }}">Volver al inicio</a
+  ><span class="muted">Tabla única de usuarios en banco.db</span>
+</div>
+<section class="panel">
+  <h2>Ver o Modificar Usuarios</h2>
+  <p class="muted">
+    Cada fila muestra el ID, nombre, saldo, foto del dataset y acciones para
+    editar, depositar o eliminar.
+  </p>
+  {% with flashes = get_flashed_messages(with_categories=true) %} {% if flashes
+  %}
+  <div class="flash-wrap">
+    {% for category, message in flashes %}
+    <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %} {% endwith %}
+  <div class="table-wrap" style="margin-top: 16px">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Saldo</th>
+          <th>Foto</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for usuario in usuarios %}
+        <tr>
+          <td>{{ usuario.id }}</td>
+          <td>{{ usuario.nombre }}</td>
+          <td>${{ '%.2f'|format(usuario.saldo) }}</td>
+          <td class="photo-cell">
+            <img
+              src="{{ url_for('foto_usuario', nombre=usuario.nombre) }}"
+              alt="Foto de {{ usuario.nombre }}"
+            />
+          </td>
+          <td>
+            <div class="actions">
+              <a
+                class="btn btn-outline"
+                href="{{ url_for('editar_usuario_page', usuario_id=usuario.id) }}"
+                >Modificar</a
+              >
+              <a
+                class="btn btn-green"
+                href="{{ url_for('depositar_usuario_page', usuario_id=usuario.id) }}"
+                >Ingresar dinero</a
+              >
+              <form
+                action="{{ url_for('eliminar_usuario_page', usuario_id=usuario.id) }}"
+                method="post"
+                onsubmit="return confirm('¿Eliminar a {{ usuario.nombre }} y su dataset?');"
+              >
+                <button class="btn btn-red" type="submit">Eliminar</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5">No hay usuarios cargados.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

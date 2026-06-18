@@ -1,0 +1,32 @@
+{% extends 'base.html' %} {% block title %}Cobrar{% endblock %} {% block content
+%}
+<div class="top-nav">
+  <a href="{{ url_for('index') }}">Volver al inicio</a
+  ><span class="muted"
+    >Cobro con verificación de vida y reconocimiento facial</span
+  >
+</div>
+<section class="panel">
+  <h2>Iniciar Escaneo y Cobrar</h2>
+  <p class="muted">
+    Al enviar el monto, se abre la cámara de escritorio con OpenCV. Primero se
+    verifica que haya una persona real y luego se intenta identificar el rostro
+    registrado.
+  </p>
+  <form method="post">
+    <div class="field">
+      <label for="monto">Monto a cobrar</label>
+      <input
+        id="monto"
+        name="monto"
+        type="number"
+        step="0.01"
+        min="0.01"
+        placeholder="Ej. 2500"
+        required
+      />
+    </div>
+    <button class="btn btn-primary" type="submit">Abrir cámara y cobrar</button>
+  </form>
+</section>
+{% endblock %}
