@@ -575,6 +575,11 @@ def registrar_page():
         exito, mensaje = registrar_nuevo_usuario_desktop(nombre, ENCODINGS_CONOCIDOS, NOMBRES_CONOCIDOS)
         if exito:
             recargar_datos()
+        # url_for() sirve para construir una URL a partir del nombre de una ruta de Flask.
+        # Sintaxis: url_for("nombre_de_la_ruta", parametro=valor).
+        # Ejemplos: url_for("index") -> "/" y url_for("foto_usuario", nombre="Ana") -> "/foto/Ana".
+        # Básicamente busca el decorador @app.route asociado a la función que le pasamos y construye la URL correspondiente.
+        # En este caso, url_for("registrar_page") devuelve "/registrar" (por el app.route ser /registrar y def registrar_page).
         return render_template(
             "resultado.html",
             titulo="Registro de usuario",
