@@ -8,6 +8,8 @@ import sqlite3
 import sys
 import time
 
+import multiprocessing
+
 import cv2
 import face_recognition
 import numpy as np
@@ -467,24 +469,51 @@ def verificar_liveness_rppg(cap, duracion_segundos=10, encodings_conocidos=None,
 
 
 # --- Acciones desktop ----------------------------------------------------
-def iniciar_escaneo_desktop(monto, encodings_conocidos, nombres_conocidos):
+def _worker_escaneo(conn, encodings_conocidos, nombres_conocidos):
+    """Corre en proceso separado para poder usar cv2.imshow en cualquier SO."""
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        return False, {
-            "titulo": "Error",
-            "detalle": "No se pudo acceder a la camara.",
-            "exito": False,
-        }
-
-    es_vivo, score_liveness, diag_liveness, usuario_reconocido = verificar_liveness_rppg(
-        cap,
-        encodings_conocidos=encodings_conocidos,
-        nombres_conocidos=nombres_conocidos,
-    )
-
-    if not es_vivo:
+        conn.send((False, 0.0, "No se pudo acceder a la camara.", None))
+        conn.close()
+        return
+    try:
+        resultado = verificar_liveness_rppg(
+            cap,
+            encodings_conocidos=encodings_conocidos,
+            nombres_conocidos=nombres_conocidos,
+        )
+    except Exception as e:
+        resultado = (False, 0.0, str(e), None)
+    finally:
         cap.release()
         cv2.destroyAllWindows()
+    conn.send(resultado)
+    conn.close()
+
+
+def iniciar_escaneo_desktop(monto, encodings_conocidos, nombres_conocidos):
+    parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+    p = multiprocessing.Process(
+        target=_worker_escaneo,
+        args=(child_conn, encodings_conocidos, nombres_conocidos),
+        daemon=True,
+    )
+    p.start()
+    child_conn.close()
+
+    try:
+        es_vivo, score_liveness, diag_liveness, usuario_reconocido = parent_conn.recv()
+    except EOFError:
+        return False, {
+            "titulo": "Error",
+            "detalle": "El proceso de escaneo termino inesperadamente.",
+            "exito": False,
+        }
+    finally:
+        parent_conn.close()
+        p.join(timeout=60)
+
+    if not es_vivo:
         return False, {
             "titulo": "Verificacion fallida",
             "detalle": (
@@ -499,8 +528,6 @@ def iniciar_escaneo_desktop(monto, encodings_conocidos, nombres_conocidos):
         }
 
     if not usuario_reconocido:
-        cap.release()
-        cv2.destroyAllWindows()
         return False, {
             "titulo": "No identificado",
             "detalle": (
@@ -509,9 +536,6 @@ def iniciar_escaneo_desktop(monto, encodings_conocidos, nombres_conocidos):
             ),
             "exito": False,
         }
-
-    cap.release()
-    cv2.destroyAllWindows()
 
     exito, resultado = actualizar_saldo(usuario_reconocido, monto)
     if exito:
@@ -729,6 +753,7 @@ def salud():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     inicializar_db()
     recargar_datos()
     app.run(host="127.0.0.1", port=5000, debug=True)
