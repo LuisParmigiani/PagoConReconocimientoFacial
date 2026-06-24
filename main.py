@@ -215,6 +215,81 @@ def recargar_datos():
 
 
 # --- Registros con OpenCV desktop ---------------------------------------
+def _worker_registro(conn, nombre_usuario, encodings_conocidos, nombres_conocidos, dataset_dir, db_path):
+    """Corre en proceso separado para poder usar cv2.imshow en cualquier SO."""
+    ruta_imagen = dataset_dir / f"{nombre_usuario}.jpg"
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        conn.send((False, "No se pudo acceder a la camara."))
+        conn.close()
+        return
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                conn.send((False, "No se pudo capturar video desde la camara."))
+                return
+
+            frame_pequeno = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            rgb_frame_pequeno = cv2.cvtColor(frame_pequeno, cv2.COLOR_BGR2RGB)
+            ubicaciones_caras = face_recognition.face_locations(rgb_frame_pequeno, model="hog")
+
+            for top, right, bottom, left in ubicaciones_caras:
+                top, right, bottom, left = top * 2, right * 2, bottom * 2, left * 2
+                cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+
+            cv2.putText(frame, "SPACE para capturar  |  Q para cancelar", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+            cv2.putText(frame, f"Usuario: {nombre_usuario}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+            estado = "Rostro detectado" if ubicaciones_caras else "No se detecta rostro"
+            color_e = (0, 255, 0) if ubicaciones_caras else (0, 0, 255)
+            cv2.putText(frame, estado, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color_e, 2)
+
+            cv2.imshow(f"Registro - {nombre_usuario}", frame)
+            tecla = cv2.waitKey(1) & 0xFF
+
+            if tecla == ord(" "):
+                if not ubicaciones_caras:
+                    continue
+
+                encodings_captura = face_recognition.face_encodings(rgb_frame_pequeno, ubicaciones_caras)
+                if encodings_captura and encodings_conocidos:
+                    distancias = face_recognition.face_distance(encodings_conocidos, encodings_captura[0])
+                    mejor_idx = int(np.argmin(distancias))
+                    if distancias[mejor_idx] < 0.45:
+                        conn.send((False, f"Esta persona ya existe como '{nombres_conocidos[mejor_idx]}'."))
+                        return
+
+                dataset_dir.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(ruta_imagen), frame)
+
+                # Registro en DB desde el subproceso (SQLite soporta acceso por archivo)
+                import sqlite3 as _sqlite3
+                c = _sqlite3.connect(db_path)
+                try:
+                    c.execute(
+                        "INSERT OR IGNORE INTO usuarios (nombre, saldo) VALUES (?, ?)",
+                        (nombre_usuario, 1000.0),
+                    )
+                    c.commit()
+                finally:
+                    c.close()
+
+                conn.send((True, f"Usuario '{nombre_usuario}' registrado con saldo inicial de $1000."))
+                return
+
+            if tecla == ord("q"):
+                conn.send((False, "Registro cancelado."))
+                return
+    except Exception as e:
+        conn.send((False, str(e)))
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        conn.close()
+
+
 def registrar_nuevo_usuario_desktop(nombre_usuario, encodings_conocidos, nombres_conocidos):
     nombre_usuario = (nombre_usuario or "").strip()
     if not nombre_usuario:
@@ -224,59 +299,26 @@ def registrar_nuevo_usuario_desktop(nombre_usuario, encodings_conocidos, nombres
     if ruta_imagen.exists():
         return False, f"El usuario '{nombre_usuario}' ya esta registrado."
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        return False, "No se pudo acceder a la camara."
+    parent_conn, child_conn = multiprocessing.Pipe(duplex=False)
+    p = multiprocessing.Process(
+        target=_worker_registro,
+        args=(child_conn, nombre_usuario, encodings_conocidos, nombres_conocidos, DATASET_DIR, DB_PATH),
+        daemon=True,
+    )
+    p.start()
+    child_conn.close()
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            cap.release()
-            cv2.destroyAllWindows()
-            return False, "No se pudo capturar video desde la camara."
+    try:
+        exito, mensaje = parent_conn.recv()
+    except EOFError:
+        return False, "El proceso de registro termino inesperadamente."
+    finally:
+        parent_conn.close()
+        p.join(timeout=120)
 
-        frame_pequeno = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-        rgb_frame_pequeno = cv2.cvtColor(frame_pequeno, cv2.COLOR_BGR2RGB)
-        ubicaciones_caras = face_recognition.face_locations(rgb_frame_pequeno, model="hog")
-
-        for top, right, bottom, left in ubicaciones_caras:
-            top, right, bottom, left = top * 2, right * 2, bottom * 2, left * 2
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-
-        cv2.putText(frame, "SPACE para capturar  |  Q para cancelar", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-        cv2.putText(frame, f"Usuario: {nombre_usuario}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-        estado = "Rostro detectado" if ubicaciones_caras else "No se detecta rostro"
-        color_e = (0, 255, 0) if ubicaciones_caras else (0, 0, 255)
-        cv2.putText(frame, estado, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color_e, 2)
-
-        cv2.imshow(f"Registro - {nombre_usuario}", frame)
-        tecla = cv2.waitKey(1) & 0xFF
-
-        if tecla == ord(" "):
-            if not ubicaciones_caras:
-                continue
-
-            encodings_captura = face_recognition.face_encodings(rgb_frame_pequeno, ubicaciones_caras)
-            if encodings_captura and encodings_conocidos:
-                distancias = face_recognition.face_distance(encodings_conocidos, encodings_captura[0])
-                mejor_idx = int(np.argmin(distancias))
-                if distancias[mejor_idx] < 0.45:
-                    cap.release()
-                    cv2.destroyAllWindows()
-                    return False, f"Esta persona ya existe como '{nombres_conocidos[mejor_idx]}'."
-
-            DATASET_DIR.mkdir(parents=True, exist_ok=True)
-            cv2.imwrite(str(ruta_imagen), frame)
-            registrar_usuario_en_db(nombre_usuario, saldo_inicial=1000.0)
-            cap.release()
-            cv2.destroyAllWindows()
-            recargar_datos()
-            return True, f"Usuario '{nombre_usuario}' registrado con saldo inicial de $1000."
-
-        if tecla == ord("q"):
-            cap.release()
-            cv2.destroyAllWindows()
-            return False, "Registro cancelado."
+    if exito:
+        recargar_datos()
+    return exito, mensaje
 
 
 # --- rPPG ---------------------------------------------------------------
